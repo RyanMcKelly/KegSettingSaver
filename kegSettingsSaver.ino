@@ -1,5 +1,8 @@
+#include <SPI.h>
 #include <SD.h>
 #include <Wire.h>
+#include <Adafruit_RGBLCDShield.h>  // RGB LCD Shield communications
+#include <Adafruit_MCP23017.h>
 #include "RTClib.h"
 
 // A simple data logger for the Arduino analog pins
@@ -17,7 +20,21 @@ uint32_t syncTime = 0; // time of last sync()
 #define ECHO_TO_SERIAL   1 // echo data to serial port
 #define WAIT_TO_START    1 // Wait for serial input in setup()
 
-#define redLEDpin 13;
+// These defines make it easy to set the backlight color
+#define OFF 0x0
+#define RED 0x1
+#define YELLOW 0x3
+#define GREEN 0x2
+#define TEAL 0x6
+#define BLUE 0x4
+#define VIOLET 0x5
+#define WHITE 0x7
+
+// LCD shield uses the I2C SCL and SDA pins (analog 4&5):
+Adafruit_RGBLCDShield lcd = Adafruit_RGBLCDShield();
+
+//Record time of last button press for Menu:
+unsigned long lastInputTime = 0; // last button press
 
 // the PWMable digital pins that connect to the LEDs
 #define pinPanelMeter_1 3
@@ -37,17 +54,47 @@ RTC_DS1307 RTC; // define the Real Time Clock object
 const int chipSelect = 10;
 
 // the logging file
-File logfile;
+File settingsFile;
+
+//Struct for load cell:
+typedef struct
+{
+  int tareValue; //Reading from load cell with empty keg on it
+  int fullValue; //Reading from load cell when set to full
+  
+} CellSettings;
+
+int nKegs = 4;
+CellSettings cellSettings[4];
 
 void error(char *str)
 {
   Serial.print("error: ");
   Serial.println(str);
   
+  lcd.setBacklight(RED);
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Error:");
+  lcd.setCursor(0,1);
+  lcd.print(str);
+  
   // red LED indicates error
-  digitalWrite(redLEDpin, HIGH);
+//  digitalWrite(redLEDpin, HIGH);
 
   while(1);
+}
+
+void loadParameters()
+{
+  // Load from SD Card:
+
+}
+
+void saveParameters()
+{
+  // Save tare/status to SD Card:
+
 }
 
 void setup(void)
@@ -55,9 +102,29 @@ void setup(void)
   Serial.begin(9600);
   Serial.println();
   
-  // use debugging LEDs
-  pinMode(redLEDpin, OUTPUT);
-  pinMode(greenLEDpin, OUTPUT);
+  // connect to RTC, activate clock.
+  Wire.begin();  
+  if (!RTC.begin()) {
+    #if ECHO_TO_SERIAL
+        Serial.println("RTC failed");
+    #endif  //ECHO_TO_SERIAL
+  }
+    // following line sets the RTC to the date & time this sketch was compiled
+    // uncomment it & upload to set the time, date and start run the RTC!
+    //RTC.adjust(DateTime(__DATE__, __TIME__));
+  
+  lcd.begin(16, 2);         // initialize display colums and rows
+  
+  int time = millis();
+  lcd.print("Monitor, Active!");
+  time = millis() - time;
+  Serial.print("Took "); Serial.print(time); Serial.println(" ms");
+  lcd.setBacklight(WHITE);
+  delay(3000);  // Splash screen
+  
+  // use debugging LEDs on SDCard Shield
+//  pinMode(redLEDpin, OUTPUT);
+//  pinMode(greenLEDpin, OUTPUT);
   
 #if WAIT_TO_START
   Serial.println("Type any character to start");
@@ -76,6 +143,11 @@ void setup(void)
   }
   Serial.println("card initialized.");
   
+  //Check to see if settings present
+  
+  //If settings present, load settings:
+  
+  //Else, if settings not present, create new settings file
 //  // create a new file
 //  char filename[] = "LOGGER00.CSV";
 //  for (uint8_t i = 0; i < 100; i++) {
@@ -83,29 +155,22 @@ void setup(void)
 //    filename[7] = i%10 + '0';
 //    if (! SD.exists(filename)) {
 //      // only open a new file if it doesn't exist
-//      logfile = SD.open(filename, FILE_WRITE); 
+//      settingsFile = SD.open(filename, FILE_WRITE); 
 //      break;  // leave the loop!
 //    }
 //  }
 //  
-//  if (! logfile) {
+//  if (! settingsFile) {
 //    error("couldnt create file");
 //  }
 //  
 //  Serial.print("Logging to: ");
 //  Serial.println(filename);
 
-  // connect to RTC
-  Wire.begin();  
-  if (!RTC.begin()) {
-    logfile.println("RTC failed");
-#if ECHO_TO_SERIAL
-    Serial.println("RTC failed");
-#endif  //ECHO_TO_SERIAL
-  }
+
   
 
-  logfile.println("millis,stamp,datetime,light,temp,vcc");    
+  settingsFile.println("millis,stamp,datetime,light,temp,vcc");    
 #if ECHO_TO_SERIAL
   Serial.println("millis,stamp,datetime,light,temp,vcc");
 #endif //ECHO_TO_SERIAL
@@ -117,14 +182,48 @@ void setup(void)
 void loop(void)
 {
   DateTime now;
+  
+  lcd.setCursor(0, 1);
+  lcd.print(millis()/1000);
+
+//  cellSettings[0].tareValue = 0;
+//  cellSettings[0].fullValue = 498;
+
+  uint8_t buttons = lcd.readButtons();
+
+  if (buttons) {
+    lcd.clear();
+    lcd.setCursor(0,0);
+    if (buttons & BUTTON_UP) {
+      lcd.print("UP ");
+      lcd.setBacklight(RED);
+    }
+    if (buttons & BUTTON_DOWN) {
+      lcd.print("DOWN ");
+      lcd.setBacklight(YELLOW);
+    }
+    if (buttons & BUTTON_LEFT) {
+      lcd.print("LEFT ");
+      lcd.setBacklight(GREEN);
+    }
+    if (buttons & BUTTON_RIGHT) {
+      lcd.print("RIGHT ");
+      lcd.setBacklight(TEAL);
+    }
+    if (buttons & BUTTON_SELECT) {
+      lcd.print("SELECT ");
+      lcd.setBacklight(VIOLET);
+    }
+  }
+
 
   // delay for the amount of time we want between readings
   delay((LOG_INTERVAL -1) - (millis() % LOG_INTERVAL));
    
   // log milliseconds since starting
   uint32_t m = millis();
-  logfile.print(m);           // milliseconds since start
-  logfile.print(", ");    
+//  settingsFile.print(m);           // milliseconds since start
+//  settingsFile.print(", ");    
 #if ECHO_TO_SERIAL
   Serial.print(m);         // milliseconds since start
   Serial.print(", ");  
@@ -133,21 +232,21 @@ void loop(void)
   // fetch the time
   now = RTC.now();
   // log time
-  logfile.print(now.unixtime()); // seconds since 1/1/1970
-  logfile.print(", ");
-  logfile.print('"');
-  logfile.print(now.year(), DEC);
-  logfile.print("/");
-  logfile.print(now.month(), DEC);
-  logfile.print("/");
-  logfile.print(now.day(), DEC);
-  logfile.print(" ");
-  logfile.print(now.hour(), DEC);
-  logfile.print(":");
-  logfile.print(now.minute(), DEC);
-  logfile.print(":");
-  logfile.print(now.second(), DEC);
-  logfile.print('"');
+//  settingsFile.print(now.unixtime()); // seconds since 1/1/1970
+//  settingsFile.print(", ");
+//  settingsFile.print('"');
+//  settingsFile.print(now.year(), DEC);
+//  settingsFile.print("/");
+//  settingsFile.print(now.month(), DEC);
+//  settingsFile.print("/");
+//  settingsFile.print(now.day(), DEC);
+//  settingsFile.print(" ");
+//  settingsFile.print(now.hour(), DEC);
+//  settingsFile.print(":");
+//  settingsFile.print(now.minute(), DEC);
+//  settingsFile.print(":");
+//  settingsFile.print(now.second(), DEC);
+//  settingsFile.print('"');
 #if ECHO_TO_SERIAL
   Serial.print(now.unixtime()); // seconds since 1/1/1970
   Serial.print(", ");
@@ -170,40 +269,21 @@ void loop(void)
 //  delay(10); 
 //  int photocellReading = analogRead(photocellPin);  
 //  
-//  analogRead(tempPin); 
-//  delay(10);
-//  int tempReading = analogRead(tempPin);    
-//  
-//  // converting that reading to voltage, for 3.3v arduino use 3.3, for 5.0, use 5.0
-//  float voltage = tempReading * aref_voltage / 1024;  
-//  float temperatureC = (voltage - 0.5) * 100 ;
-//  float temperatureF = (temperatureC * 9 / 5) + 32;
-//  
-//  logfile.print(", ");    
-//  logfile.print(photocellReading);
-//  logfile.print(", ");    
-//  logfile.print(temperatureF);
-//#if ECHO_TO_SERIAL
-//  Serial.print(", ");   
-//  Serial.print(photocellReading);
-//  Serial.print(", ");    
-//  Serial.print(temperatureF);
-//#endif //ECHO_TO_SERIAL
-//
 //  // Log the estimated 'VCC' voltage by measuring the internal 1.1v ref
 //  analogRead(BANDGAPREF); 
 //  delay(10);
 //  int refReading = analogRead(BANDGAPREF); 
 //  float supplyvoltage = (bandgap_voltage * 1024) / refReading; 
 //  
-//  logfile.print(", ");
-//  logfile.print(supplyvoltage);
+//  logFile.print(supplyvoltage);
 //#if ECHO_TO_SERIAL
-//  Serial.print(", ");   
+//  Serial.println();
+//  Serial.print(Supply Voltage: ");   
 //  Serial.print(supplyvoltage);
+//  Serial.println();
 //#endif // ECHO_TO_SERIAL
-
-  logfile.println();
+//
+//  settingsFile.println();
 #if ECHO_TO_SERIAL
   Serial.println();
 #endif // ECHO_TO_SERIAL
@@ -216,8 +296,9 @@ void loop(void)
   syncTime = millis();
   
   // blink LED to show we are syncing data to the card & updating FAT!
-  digitalWrite(redLEDpin, HIGH);
-  logfile.flush();
-  digitalWrite(redLEDpin, LOW);
+//  digitalWrite(redLEDpin, HIGH);
+//  settingsFile.flush();
+//  digitalWrite(redLEDpin, LOW);
   
 }
+
