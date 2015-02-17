@@ -18,7 +18,7 @@
 uint32_t syncTime = 0; // time of last sync()
 
 #define ECHO_TO_SERIAL   1 // echo data to serial port
-#define WAIT_TO_START    1 // Wait for serial input in setup()
+#define WAIT_TO_START    0// Wait for serial input in setup()
 
 // These defines make it easy to set the backlight color
 #define OFF 0x0
@@ -217,8 +217,8 @@ void loop(void)
   }
 
 
-  // delay for the amount of time we want between readings
-  delay((LOG_INTERVAL -1) - (millis() % LOG_INTERVAL));
+//  // delay for the amount of time we want between readings
+//  delay((LOG_INTERVAL -1) - (millis() % LOG_INTERVAL));
    
   // log milliseconds since starting
   uint32_t m = millis();
